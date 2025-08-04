@@ -17,9 +17,11 @@
     "clsx": "^2.1.1",
     "lucide-react": "^0.535.0",
     "next": "15.2.4",
+    "node-appwrite": "^17.1.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "tailwind-merge": "^3.3.1"
+    "tailwind-merge": "^3.3.1",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",

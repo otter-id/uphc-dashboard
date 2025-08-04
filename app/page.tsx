@@ -25,17 +25,68 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { Client, Databases, Query } from 'node-appwrite';
+import * as XLSX from 'xlsx';
+
+
+const client = new Client()
+  .setEndpoint('https://syd.cloud.appwrite.io/v1')
+  .setProject('688b52ec003360213d85').setKey('standard_f32d660e7b6655d82674b873ccb7c696fbc4a814b3d277184fbbfe6d26c74346fd06f9e6bed5a8f0d36f92f47bfd89004a4d8fbfd53c8ee058d2e4ccb5108c0a8c3298fb13b7b2b8bc787a0a80f45fe6c9458a2ebfd4d577953b73d5f8580ef198314a99af2de49d3d63d0cd24e664f807de8cb9a97295d46cbeefc5e17154f1');
+
+const db = new Databases(client);
+
+const formPrice = 1;
 
 export default function DisbursementApp() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [qrisCount, setQrisCount] = useState(0);
+  const [otherCount, setOtherCount] = useState(0);
+  const [isLoading, setIsLoading] = useState(false);
+  const [balance, setBalance] = useState(0);
+  const [pendingBalance, setPendingBalance] = useState(0);
+  const [isDisbursementLoading, setIsDisbursementLoading] = useState(false);
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
+
+  const handleDeleteDatabase = async () => {
+    setIsLoading(true);
+    const documents = await db.listDocuments(
+      process.env.NEXT_PUBLIC_DATABASE_ID!,
+      process.env.NEXT_PUBLIC_REGISTRAR_ID!,
+      [Query.limit(3)]
+      // [Query.select(['$id']), Query.limit(100)]
+    );
+    // while (documents.documents.length < documents.total) {
+    //   const nextResponse = await db.listDocuments(
+    //     process.env.NEXT_PUBLIC_DATABASE_ID!,
+    //     process.env.NEXT_PUBLIC_REGISTRAR_ID!,
+    //     [Query.select(['$id']), Query.limit(100), Query.offset(documents.documents.length)]
+    //   );
+    //   documents.documents.push(...nextResponse.documents);
+    // }
+    // await Promise.all(documents.documents.map(async (document: any) => {
+    //   await db.deleteDocument(  
+    //     process.env.NEXT_PUBLIC_DATABASE_ID!,
+    //     process.env.NEXT_PUBLIC_REGISTRAR_ID!,
+    //     document.$id
+    //   );
+    //   console.log('Deleted document: ' + document.$id);
+    // }));
+    setIsLoading(false);
+    setIsDialogOpen(false); // Tutup dialog setelah selesai
+  };
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
     // Simple validation - in real app, you'd validate against a backend
-    if (username && password) {
+    if (username === process.env.NEXT_PUBLIC_USERNAME && password === process.env.NEXT_PUBLIC_PASSWORD) {
       setIsLoggedIn(true);
+      fetchTransactionSummary();
+      fetchDisbursementData();
+    } else {
+      alert("Username atau password salah");
     }
   };
 
@@ -45,21 +96,135 @@ export default function DisbursementApp() {
     setPassword("");
   };
 
-  // Mock data for dashboard
-  const summaryData = {
-    qris: {
-      count: 1247,
-      amount: 45750000,
-    },
-    others: {
-      count: 892,
-      amount: 32150000,
-    },
+  const fetchTransactionSummary = async () => {
+    setIsLoading(true);
+    const response = await db.listDocuments(
+      process.env.NEXT_PUBLIC_DATABASE_ID!,
+      process.env.NEXT_PUBLIC_PAYMENT_ID!,
+      [Query.select(['paymentMethod', 'uniqueCode']), Query.limit(100)]
+    );
+
+    while (response.documents.length < response.total) {
+      const nextResponse = await db.listDocuments(
+        process.env.NEXT_PUBLIC_DATABASE_ID!,
+        process.env.NEXT_PUBLIC_PAYMENT_ID!,
+        [Query.select(['paymentMethod', 'uniqueCode']), Query.limit(100), Query.offset(response.documents.length)]
+      );
+      response.documents.push(...nextResponse.documents);
+    }
+
+    setQrisCount(response.documents.filter((doc: any) => doc.paymentMethod === 'QRIS').length);
+    setOtherCount(response.documents.filter((doc: any) => doc.paymentMethod === 'OTHER').length);
+    setIsLoading(false);
   };
 
-  const disbursementData = {
-    availableBalance: 12500000,
-    pendingBalance: 8750000,
+  const fetchDisbursementData = async () => {
+    setIsDisbursementLoading(true);
+    const [balance, pendingBalance] = await Promise.all([
+      fetch(`${process.env.NEXT_PUBLIC_XENDIT_BALANCE_URL}`, {
+        headers: {
+          "Authorization": `Basic ${process.env.NEXT_PUBLIC_XENDIT_KEY}`,
+          "for-user-id": process.env.NEXT_PUBLIC_XENDIT_USER_ID || "",
+        },
+      }),
+      fetch(`${process.env.NEXT_PUBLIC_XENDIT_BALANCE_URL}?account_type=HOLDING`, {
+        headers: {
+          "Authorization": `Basic ${process.env.NEXT_PUBLIC_XENDIT_KEY}`,
+          "for-user-id": process.env.NEXT_PUBLIC_XENDIT_USER_ID || "",
+        },
+      }),
+    ]);
+
+    const balanceData = await balance.json();
+    const pendingBalanceData = await pendingBalance.json();
+
+    setBalance(balanceData.balance);
+    setPendingBalance(pendingBalanceData.balance);
+    setIsDisbursementLoading(false);
+  };
+
+  const exportAllData = async () => {
+    setIsExporting(true);
+    
+    try {
+      // Fetch all registrar data
+      const registrarData = await fetchAllDocuments(
+        process.env.NEXT_PUBLIC_DATABASE_ID!,
+        process.env.NEXT_PUBLIC_REGISTRAR_ID!
+      );
+      
+      // Fetch all payment data
+      const paymentData = await fetchAllDocuments(
+        process.env.NEXT_PUBLIC_DATABASE_ID!,
+        process.env.NEXT_PUBLIC_PAYMENT_ID!
+      );
+      
+      // Create a map of payment data by uniqueCode for faster lookup
+      const paymentMap: Record<string, any> = {};
+      paymentData.forEach(payment => {
+        paymentMap[payment.uniqueCode] = payment;
+      });
+      
+      // Merge data based on uniqueCode
+      const mergedData = registrarData.map(registrar => {
+        const payment = paymentMap[registrar.uniqueCode] || {};
+        const { $id, $createdAt, $updatedAt, $permissions,$sequence, $databaseId, $collectionId,currentSchoolYearParsed, ...cleanRegistrar } = registrar;
+        return {
+          ...cleanRegistrar,
+          paymentMethod: payment.paymentMethod || '-',
+          paymentDate: payment.$createdAt || '-',
+          amount: payment.paymentMethod === undefined ? 0 : 1500000,
+          package: payment.package || '-'
+        };
+      });
+      
+      // Export to Excel
+      const worksheet = XLSX.utils.json_to_sheet(mergedData);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Registrasi");
+      
+      // Generate Excel file
+      const excelBuffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
+      const blob = new Blob([excelBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      
+      // Create download link
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `UPHC_Registrasi_${new Date().toISOString().split('T')[0]}.xlsx`;
+      document.body.appendChild(link);
+      link.click();
+      
+      // Clean up
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Error exporting data:', error);
+      alert('Gagal mengekspor data. Silakan coba lagi.');
+    } finally {
+      setIsExporting(false);
+    }
+  };
+  
+  const fetchAllDocuments = async (databaseId: string, collectionId: string) => {
+    // First batch
+    const documents = await db.listDocuments(
+      databaseId,
+      collectionId,
+      [Query.limit(100)]
+    );
+    
+    // Continue fetching if there are more documents
+    while (documents.documents.length < documents.total) {
+      const nextResponse = await db.listDocuments(
+        databaseId,
+        collectionId,
+        [Query.limit(100), Query.offset(documents.documents.length)]
+      );
+      documents.documents.push(...nextResponse.documents);
+    }
+    
+    return documents.documents;
   };
 
   const formatRupiah = (amount: number) => {
@@ -182,6 +347,8 @@ export default function DisbursementApp() {
                 variant="outline"
                 size="sm"
                 className="flex items-center gap-2 border-teal-600 text-teal-600 hover:bg-teal-600 hover:text-white bg-transparent"
+                onClick={exportAllData}
+                disabled={isExporting}
               >
                 <svg
                   className="h-4 w-4"
@@ -196,7 +363,7 @@ export default function DisbursementApp() {
                     d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
                   />
                 </svg>
-                Export
+                {isExporting ? "Mengekspor..." : "Export All Data"}
               </Button>
             </div>
           </CardHeader>
@@ -210,13 +377,13 @@ export default function DisbursementApp() {
                 <div>
                   <p className="font-medium text-black">QRIS</p>
                   <p className="text-sm text-gray-600">
-                    {summaryData.qris.count} transaksi
+                    {isLoading ? "Loading..." : qrisCount + " transaksi"}
                   </p>
                 </div>
               </div>
               <div className="text-right">
                 <p className="font-semibold text-black">
-                  {formatRupiah(summaryData.qris.amount)}
+                  {isLoading ? "Loading..." : formatRupiah(qrisCount*formPrice)}
                 </p>
               </div>
             </div>
@@ -225,18 +392,33 @@ export default function DisbursementApp() {
             <div className="flex items-center justify-between p-3 bg-green-50 rounded-lg border border-green-200">
               <div className="flex items-center gap-3">
                 <div className="p-2 bg-green-100 rounded-full">
-                  <Wallet className="h-4 w-4 text-green-600" />
+                  <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+                    <DialogTrigger asChild>
+                      <Wallet className="h-4 w-4 text-green-600" />
+                    </DialogTrigger>
+                    <DialogContent className="max-w-sm">
+                      <DialogHeader>
+                        <DialogTitle className="text-black">Hapus Database</DialogTitle>
+                        <DialogDescription className="text-left text-gray-700">
+                          Apakah Anda yakin ingin menghapus database pendaftaran ?
+                        </DialogDescription>
+                      </DialogHeader>
+                      <div className="flex justify-end gap-2 mt-4">
+                        <Button onClick={handleDeleteDatabase} className="bg-teal-600 hover:bg-teal-700">Konfirmasi</Button>
+                      </div>
+                    </DialogContent>
+                  </Dialog>
                 </div>
                 <div>
-                  <p className="font-medium text-black">Lainnya</p>
+                  <p className="font-medium text-black">Lainnya (EDC/Transfer)</p>
                   <p className="text-sm text-gray-600">
-                    {summaryData.others.count} transaksi
+                    {isLoading ? "Loading..." : otherCount + " transaksi"}
                   </p>
                 </div>
               </div>
               <div className="text-right">
                 <p className="font-semibold text-black">
-                  {formatRupiah(summaryData.others.amount)}
+                  {isLoading ? "Loading..." : formatRupiah(otherCount*formPrice)}
                 </p>
               </div>
             </div>
@@ -248,14 +430,12 @@ export default function DisbursementApp() {
               <div>
                 <p className="font-semibold text-black">Total</p>
                 <p className="text-sm text-gray-600">
-                  {summaryData.qris.count + summaryData.others.count} transaksi
+                  {isLoading ? "Loading..." : qrisCount + otherCount + " transaksi"}
                 </p>
               </div>
               <div className="text-right">
                 <p className="text-lg font-bold text-black">
-                  {formatRupiah(
-                    summaryData.qris.amount + summaryData.others.amount
-                  )}
+                  {isLoading ? "Loading..." : formatRupiah(qrisCount*formPrice + otherCount*formPrice)}
                 </p>
               </div>
             </div>
@@ -282,7 +462,7 @@ export default function DisbursementApp() {
                     Saldo Tersedia
                   </p>
                   <p className="text-2xl font-bold text-black">
-                    {formatRupiah(disbursementData.availableBalance)}
+                    {isDisbursementLoading ? "Loading..." : formatRupiah(balance)}
                   </p>
                 </div>
                 <Badge
@@ -292,9 +472,9 @@ export default function DisbursementApp() {
                   Siap Tarik
                 </Badge>
               </div>
-              <Button className="w-full mt-3 bg-teal-600 hover:bg-teal-700 text-white">
-                Tarik Dana
-              </Button>
+
+                Hubungi Tim Otter untuk Tarik Dana
+          
             </div>
 
             {/* Pending Balance */}
@@ -340,7 +520,7 @@ export default function DisbursementApp() {
                 </Badge>
               </div>
               <p className="text-2xl font-bold text-black">
-                {formatRupiah(disbursementData.pendingBalance)}
+                {isDisbursementLoading ? "Loading..." : formatRupiah(pendingBalance)}
               </p>
             </div>
 
@@ -348,9 +528,9 @@ export default function DisbursementApp() {
             <div className="p-4 bg-gray-100 rounded-lg border border-gray-200">
               <p className="text-sm font-medium text-gray-600">Total Saldo</p>
               <p className="text-xl font-bold text-black">
-                {formatRupiah(
-                  disbursementData.availableBalance +
-                    disbursementData.pendingBalance
+                {isDisbursementLoading ? "Loading..." : formatRupiah(
+                  balance +
+                    pendingBalance
                 )}
               </p>
             </div>

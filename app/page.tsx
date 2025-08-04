@@ -35,7 +35,7 @@ const client = new Client()
 
 const db = new Databases(client);
 
-const formPrice = 1;
+const formPrice = Number (process.env.NEXT_PUBLIC_FORM_PRICE || 1500000);
 
 export default function DisbursementApp() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);

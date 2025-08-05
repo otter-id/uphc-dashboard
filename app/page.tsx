@@ -341,7 +341,7 @@ export default function DisbursementApp() {
                   Ringkasan Transaksi
                 </CardTitle>
                 <CardDescription className="text-gray-600">
-                  Total transaksi hari ini
+                  Total transaksi pembelian Formulir
                 </CardDescription>
               </div>
               <Button

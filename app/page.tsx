@@ -173,8 +173,10 @@ export default function DisbursementApp() {
           ...cleanRegistrar,
           paymentMethod: payment.paymentMethod || '-',
           paymentDate: payment.$createdAt || '-',
-          amount: payment.paymentMethod === undefined ? 0 : 1500000,
-          package: payment.package || '-'
+          form: payment.paymentMethod === undefined ? 0 : 1500000,
+          package: payment.package || '-',
+          dpp: payment.dpp || '0',
+          admin: payment.admin || '0',
         };
       });
       

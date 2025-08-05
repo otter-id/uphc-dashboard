@@ -55,25 +55,24 @@ export default function DisbursementApp() {
     const documents = await db.listDocuments(
       process.env.NEXT_PUBLIC_DATABASE_ID!,
       process.env.NEXT_PUBLIC_REGISTRAR_ID!,
-      [Query.limit(3)]
-      // [Query.select(['$id']), Query.limit(100)]
+      [Query.select(['$id']), Query.limit(100)]
     );
-    // while (documents.documents.length < documents.total) {
-    //   const nextResponse = await db.listDocuments(
-    //     process.env.NEXT_PUBLIC_DATABASE_ID!,
-    //     process.env.NEXT_PUBLIC_REGISTRAR_ID!,
-    //     [Query.select(['$id']), Query.limit(100), Query.offset(documents.documents.length)]
-    //   );
-    //   documents.documents.push(...nextResponse.documents);
-    // }
-    // await Promise.all(documents.documents.map(async (document: any) => {
-    //   await db.deleteDocument(  
-    //     process.env.NEXT_PUBLIC_DATABASE_ID!,
-    //     process.env.NEXT_PUBLIC_REGISTRAR_ID!,
-    //     document.$id
-    //   );
-    //   console.log('Deleted document: ' + document.$id);
-    // }));
+    while (documents.documents.length < documents.total) {
+      const nextResponse = await db.listDocuments(
+        process.env.NEXT_PUBLIC_DATABASE_ID!,
+        process.env.NEXT_PUBLIC_REGISTRAR_ID!,
+        [Query.select(['$id']), Query.limit(100), Query.offset(documents.documents.length)]
+      );
+      documents.documents.push(...nextResponse.documents);
+    }
+    await Promise.all(documents.documents.map(async (document: any) => {
+      await db.deleteDocument(  
+        process.env.NEXT_PUBLIC_DATABASE_ID!,
+        process.env.NEXT_PUBLIC_REGISTRAR_ID!,
+        document.$id
+      );
+      console.log('Deleted document: ' + document.$id);
+    }));
     setIsLoading(false);
     setIsDialogOpen(false); // Tutup dialog setelah selesai
   };

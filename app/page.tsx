@@ -171,7 +171,9 @@ export default function DisbursementApp() {
         return {
           ...cleanRegistrar,
           paymentMethod: payment.paymentMethod || '-',
-          paymentDate: payment.$createdAt || '-',
+          paymentDate: payment.$createdAt ? 
+            new Date(new Date(payment.$createdAt).getTime() + (7 * 60 * 60 * 1000)).toISOString().replace('T', ' ').substring(0, 19) 
+            : '-',
           form: payment.paymentMethod === undefined ? 0 : 1500000,
           package: payment.package || '-',
           dpp: payment.dpp || '0',
